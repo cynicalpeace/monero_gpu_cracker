@@ -31,33 +31,40 @@
  * or public domain where applicable (see https://github.com/openwall/john).
  */
 
-#ifndef CN_CUDA_H
-#define CN_CUDA_H
-
-#include <stddef.h>
-#include <stdint.h>
-
-/* Define HASH_SIZE if not already defined */
-#ifndef HASH_SIZE
-#define HASH_SIZE 32
-#endif
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-/*
- * Host-side wrapper function to compute the CryptoNight slow hash on the GPU.
- * [passwords] is an array of C strings.
- * [num_passwords] is the number of candidate passwords.
- * [hashes] must point to a contiguous buffer of (num_passwords * HASH_SIZE) bytes.
- * [threads_per_block] specifies the number of threads per block for the CUDA kernel.
- * Returns 0 on success, -1 on failure.
- */
-int compute_cn_slow_hash_cuda(const char **passwords, size_t num_passwords, unsigned char *hashes, int threads_per_block);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif // CN_CUDA_H
+ #ifndef CN_CUDA_H
+ #define CN_CUDA_H
+ 
+ #include <stddef.h>
+ #include <stdint.h>
+ 
+ /* Define HASH_SIZE if not already defined */
+ #ifndef HASH_SIZE
+ #define HASH_SIZE 32
+ #endif
+ 
+ /* Union for efficient block handling, aligned to 16 bytes for CUDA efficiency */
+ union cn_slow_hash_block {
+     uint8_t bytes[16];
+     uint32_t words[4];
+     uint64_t dwords[2];
+ } __attribute__((aligned(16)));
+ 
+ #ifdef __cplusplus
+ extern "C" {
+ #endif
+ 
+ /*
+  * Host-side wrapper function to compute the CryptoNight slow hash on the GPU.
+  * [passwords] is an array of C strings.
+  * [num_passwords] is the number of candidate passwords.
+  * [hashes] must point to a contiguous buffer of (num_passwords * HASH_SIZE) bytes.
+  * [threads_per_block] specifies the number of threads per block for the CUDA kernel.
+  * Returns 0 on success, -1 on failure.
+  */
+ int compute_cn_slow_hash_cuda(const char **passwords, size_t num_passwords, unsigned char *hashes, int threads_per_block);
+ 
+ #ifdef __cplusplus
+ }
+ #endif
+ 
+ #endif // CN_CUDA_H

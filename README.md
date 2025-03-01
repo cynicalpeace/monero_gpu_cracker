@@ -43,7 +43,7 @@ nvcc -rdc=true -c keccak_cuda.cu -o keccak_cuda.o
 
 #### Link and Build the Executable:
 ```bash
-nvcc -rdc=true -o monero_cracker main.c slow_hash_plug.c keccak_plug.c chacha_plug.c blake256_plug.c groestl_plug.c jh_plug.c skein.c oaes_lib_plug.c KeccakSponge.c KeccakF-1600-opt64.c common.c memory.c misc.c aes_cuda.o keccak_cuda.o cn_cuda.o -Xcompiler -fopenmp -I. -I./mbedtls -lcudart -L/usr/local/cuda/lib64 -L/usr/lib/nvidia -lnvidia-ml
+nvcc -rdc=true -arch=sm_89 -o monero_cracker main.c slow_hash_plug.c keccak_plug.c chacha_plug.c blake256_plug.c groestl_plug.c jh_plug.c skein.c oaes_lib_plug.c KeccakSponge.c KeccakF-1600-opt64.c common.c memory.c misc.c aes_cuda.o keccak_cuda.o cn_cuda.o -Xcompiler -fopenmp -I. -I./mbedtls -lcudart -L/usr/local/cuda/lib64 -L/usr/lib/nvidia -lnvidia-ml
 
 ./monero_cracker
 ```
@@ -59,9 +59,9 @@ Usage: ./monero_cracker <hash_file> --wordlist <wordlist_file> [options]
 Benchmark Mode: ./monero_cracker -B [<num_passwords>] [options]
 
 Options:
-  -t, --threads <threads>    Set threads per block (default: 96)
+  -t, --threads <threads>    Set threads per block (default: 32)
   -b, --batch <batch_size>   Set batch size (default: auto)
-  -B, --benchmark [<num>]    Run benchmark with <num> passwords (default: 10000)
+  -B, --benchmark [<num>]    Run benchmark with <num> passwords (default: 20000)
   -s, --session <name>       Save progress under <name>
   -r, --resume <name>        Resume from session <name>
   -c, --checkpoint <seconds> Checkpoint save interval (default: 60s)
@@ -70,7 +70,7 @@ Options:
   -h, --help                 Show this help
 
 Note: <hash_file> should contain only the hash from monero2john.py.
-              e.g., '$monero$0*886500ad343766b8850dee...'
+             e.g., '$monero$0*886500ad343766b8850dee...'
 ```
 
 ### Examples:
@@ -78,6 +78,26 @@ Note: <hash_file> should contain only the hash from monero2john.py.
 ./monero_cracker hash.txt --wordlist words.txt -t 128 -b 5000
 ./monero_cracker -B 10000 -t 96 -b 5000
 ./monero_cracker hash.txt --wordlist words.txt -r mysession
+```
+
+## Sample Output
+```bash
+$ ./monero_cracker --benchmark --batch 10000 --threads 32 --verbose 0
+Monero GPU Cracker v0.1 by cynicalpeace
+GitHub: https://github.com/cynicalpeace/monero_gpu_cracker
+Using GPU: NVIDIA GeForce RTX 4090 with 24195 MB total memory
+Total GPU memory: 24195 MB, Free: 23007 MB, Required: 20000 MB
+Running benchmark: 20000 passwords, 32 threads, 10000 batch size
+Note: Threads and batch size can be set with -t and -b
+
+--- Result ---
+Benchmark stopped at the last full batch
+Passwords tried: 20000 / 20000
+GPU time: 10.316 seconds
+CPU time: 0.004 seconds
+Total time: 10.367 seconds
+Average Throughput: 1938.66 hashes/second
+Program completed
 ```
 
 ## License
@@ -104,3 +124,4 @@ Feel free to submit issues or pull requests on GitHub. If testing on other GPUs,
 
 - Add support for additional GPU architectures.
 - Implement support for accepting multiple hashes from a single file for concurrent cracking.
+- Profile kernel for memory optimization.

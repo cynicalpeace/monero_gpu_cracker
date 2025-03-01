@@ -41,18 +41,24 @@
 #define OAES_RET int
 #define OAES_RET_SUCCESS 0
 
+// Declare the S-box as extern __device__ for external linkage
+extern __device__ uint8_t oaes_sub_byte_value[16][16];
+
 // AES transformation functions
-__device__ void oaes_sub_bytes_cuda(uint8_t *block);
+__device__ void oaes_sub_bytes_cuda(uint8_t *block, uint8_t *shared_sbox);
 __device__ void oaes_shift_rows_cuda(uint8_t block[AES_BLOCK_SIZE]);
 __device__ void oaes_mix_columns_cuda(uint8_t block[AES_BLOCK_SIZE]);
 __device__ void oaes_add_round_key_cuda(const uint32_t *round_key, uint8_t *block);
 
+// Galois Field multiplication helper
+__device__ uint8_t oaes_gf_mul(uint8_t left, uint8_t right);
+
 // AES round and encryption functions
 __device__ OAES_RET oaes_encryption_round_cuda_full(const uint32_t *round_key, uint8_t *block);
 __device__ void oaes_key_expand_cuda_10(uint32_t *expanded_key, const uint8_t *key);
-__device__ OAES_RET oaes_pseudo_encrypt_ecb_cuda_10rounds(uint32_t *expanded_key, uint8_t *block);
+__device__ OAES_RET oaes_pseudo_encrypt_ecb_cuda_10rounds(uint32_t *expanded_key, uint8_t *block, uint8_t *shared_sbox);
 __device__ void oaes_key_expand_cuda_14(uint32_t *expanded_key, const uint8_t *key);
-__device__ OAES_RET oaes_pseudo_encrypt_ecb_cuda_14rounds(uint32_t *expanded_key, uint8_t *block);
+__device__ OAES_RET oaes_pseudo_encrypt_ecb_cuda_14rounds(uint32_t *expanded_key, uint8_t *block, uint8_t *shared_sbox);
 
 // Key import function
 __device__ void oaes_key_import_data_cuda(uint32_t *key, const uint8_t *data, size_t length);

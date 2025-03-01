@@ -48,7 +48,7 @@
 #define OAES_RET_SUCCESS 0
 #endif
 
-// AES S-box in device memory
+// Define the S-box with initialization
 __device__ uint8_t oaes_sub_byte_value[16][16] = {
     {0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76},
     {0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0},
@@ -109,19 +109,19 @@ __device__ uint8_t oaes_gf_mul_3[16][16] = {
 
 // Galois Field multiplication helper
 __device__ uint8_t oaes_gf_mul(uint8_t left, uint8_t right) {
-    size_t _x = left & 0x0f, _y = (left & 0xf0) >> 4;
+    size_t x = left & 0x0f, y = (left & 0xf0) >> 4;
     switch (right) {
-        case 0x02: return oaes_gf_mul_2[_y][_x];
-        case 0x03: return oaes_gf_mul_3[_y][_x];
+        case 0x02: return oaes_gf_mul_2[y][x];
+        case 0x03: return oaes_gf_mul_3[y][x];
         default: return left;
     }
 }
 
 // AES transformation functions
-__device__ void oaes_sub_bytes_cuda(uint8_t *block) {
+__device__ void oaes_sub_bytes_cuda(uint8_t *block, uint8_t *shared_sbox) {
     for (int i = 0; i < AES_BLOCK_SIZE; i++) {
         uint8_t x = block[i] & 0x0f, y = (block[i] & 0xf0) >> 4;
-        block[i] = oaes_sub_byte_value[y][x];
+        block[i] = shared_sbox[y * 16 + x]; // Treat shared_sbox as 1D array
     }
 }
 
@@ -231,9 +231,9 @@ __device__ void oaes_key_expand_cuda_14(uint32_t *expanded_key, const uint8_t *k
 }
 
 // Pseudo-encryption for scratchpad initialization (10 rounds)
-__device__ OAES_RET oaes_pseudo_encrypt_ecb_cuda_10rounds(uint32_t *expanded_key, uint8_t *block) {
+__device__ OAES_RET oaes_pseudo_encrypt_ecb_cuda_10rounds(uint32_t *expanded_key, uint8_t *block, uint8_t *shared_sbox) {
     for (int round = 0; round < 10; round++) {
-        oaes_sub_bytes_cuda(block);
+        oaes_sub_bytes_cuda(block, shared_sbox);
         oaes_shift_rows_cuda(block);
         oaes_mix_columns_cuda(block);
         oaes_add_round_key_cuda(expanded_key + round * 4, block);
@@ -242,14 +242,14 @@ __device__ OAES_RET oaes_pseudo_encrypt_ecb_cuda_10rounds(uint32_t *expanded_key
 }
 
 // Pseudo-encryption for finalization (14 rounds)
-__device__ OAES_RET oaes_pseudo_encrypt_ecb_cuda_14rounds(uint32_t *expanded_key, uint8_t *block) {
+__device__ OAES_RET oaes_pseudo_encrypt_ecb_cuda_14rounds(uint32_t *expanded_key, uint8_t *block, uint8_t *shared_sbox) {
     for (int round = 0; round < 13; round++) {
-        oaes_sub_bytes_cuda(block);
+        oaes_sub_bytes_cuda(block, shared_sbox);
         oaes_shift_rows_cuda(block);
         oaes_mix_columns_cuda(block);
         oaes_add_round_key_cuda(expanded_key + round * 4, block);
     }
-    oaes_sub_bytes_cuda(block);
+    oaes_sub_bytes_cuda(block, shared_sbox);
     oaes_shift_rows_cuda(block);
     oaes_add_round_key_cuda(expanded_key + 13 * 4, block);
     return OAES_RET_SUCCESS;

@@ -1,7 +1,6 @@
 /*
  * keccak_cuda.cu - CUDA Implementation for Monero GPU Cracker v0.1
  * Copyright (c) 2025 cynicalpeace
- * GitHub: https://github.com/cynicalpeace/monero_gpu_cracker
  *
  * This file provides CUDA-accelerated Keccak hash computation for the Monero GPU
  * Cracker, a tool to crack Monero wallet passwords using a hash from monero2john.py.

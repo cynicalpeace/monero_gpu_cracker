@@ -55,7 +55,7 @@
  #define MEMORY_PER_PASSWORD (1 << 21) + 200
  #define MIN_BATCH_SIZE 10
  #define MAX_BATCH_SIZE 10000
- #define DEFAULT_BENCHMARK_PASSWORDS 10000
+ #define DEFAULT_BENCHMARK_PASSWORDS 20000
  #define DEFAULT_CHECKPOINT_INTERVAL 60
  #define RATE_WINDOW_SIZE 5  // Number of batches to average hash rate over
  
@@ -68,7 +68,7 @@
  // Global variables
  int verbosity = 2;
  int benchmark_mode = 0;
- size_t benchmark_passwords = 0;
+ long long benchmark_passwords = 0;
  char *session_name = NULL;
  char *checkpoint_file = NULL;
  int checkpoint_interval = DEFAULT_CHECKPOINT_INTERVAL;
@@ -76,6 +76,8 @@
  size_t initial_passwords_tested = 0;
  size_t total_candidates = 0;
  double gpu_time = 0.0, cpu_time = 0.0;
+ size_t total_passwords_processed = 0;  // Tracks total passwords processed
+ double total_gpu_time = 0.0;           // Tracks total GPU time
  struct timespec start_time, end_time, last_checkpoint_time;
  FILE *wordlist_file = NULL;
  long long file_position = 0;
@@ -85,6 +87,7 @@
  char *generated_hash = NULL;
  double batch_rates[RATE_WINDOW_SIZE] = {0};
  int batch_count = 0;
+ char *found_password = NULL;           // To store the found password
  
  // Function prototypes
  void print_help();
@@ -136,13 +139,10 @@
      }
  
      if (level >= 1) {
-         size_t free_mem, total_mem;
-         cudaMemGetInfo(&free_mem, &total_mem);
          printf("\n--- Stats ---\n");
          printf("Passwords tried: %zu / %zu\n", passwords_tested, total_candidates);
          printf("Current batch passwords: %s -> %s\n", first_pwd ? first_pwd : "N/A", last_pwd ? last_pwd : "N/A");
          printf("Hash rate: %.2f hashes/second\n", avg_rate);
-         printf("GPU Memory Usage: %zu MB / %zu MB\n", (total_mem - free_mem) / 1024 / 1024, total_mem / 1024 / 1024);
      }
      if (level >= 2) {
          nvmlUtilization_t utilization;
@@ -180,7 +180,7 @@
      printf("Usage: ./monero_cracker <hash_file> --wordlist <wordlist_file> [options]\n");
      printf("Benchmark Mode: ./monero_cracker -B [<num_passwords>] [options]\n");
      printf("\nOptions:\n");
-     printf("  -t, --threads <threads>    Set threads per block (default: 96)\n");
+     printf("  -t, --threads <threads>    Set threads per block (default: 32)\n");
      printf("  -b, --batch <batch_size>   Set batch size (default: auto)\n");
      printf("  -B, --benchmark [<num>]    Run benchmark with <num> passwords (default: %d)\n", DEFAULT_BENCHMARK_PASSWORDS);
      printf("  -s, --session <name>       Save progress under <name>\n");
@@ -193,7 +193,7 @@
      printf("            e.g., '$monero$0*886500ad343766b8850dee...'\n\n");
      printf("Examples:\n");
      printf("  ./monero_cracker hash.txt --wordlist words.txt -t 128 -b 5000\n");
-     printf("  ./monero_cracker -B 10000 -t 96 -b 5000\n");
+     printf("  ./monero_cracker -B 50000 -t 32 -b 5000\n");
      printf("  ./monero_cracker hash.txt --wordlist words.txt -r mysession\n");
  }
  
@@ -206,7 +206,7 @@
      char **saved_key = NULL;
      unsigned char **plaintext = NULL;
      int found = 0;
-     int threads_per_block = 96;
+     int threads_per_block = 32;
      char *batch_size_str = "auto";
      int batch_size_mode = 0;
      size_t fixed_batch_size = 0;
@@ -256,9 +256,7 @@
                  break;
              case 'B':
                  benchmark_mode = 1;
-                 if (optarg == NULL) {
-                     benchmark_passwords = DEFAULT_BENCHMARK_PASSWORDS;
-                 } else {
+                 if (optarg) {
                      benchmark_passwords = atoll(optarg);
                      if (benchmark_passwords <= 0) {
                          fprintf(stderr, "Monero GPU Cracker v0.1 by cynicalpeace\n");
@@ -266,6 +264,17 @@
                          fprintf(stderr, "Error: Benchmark passwords must be positive\n");
                          return 1;
                      }
+                 } else if (optind < argc && isdigit(argv[optind][0])) {
+                     benchmark_passwords = atoll(argv[optind]);
+                     optind++;
+                     if (benchmark_passwords <= 0) {
+                         fprintf(stderr, "Monero GPU Cracker v0.1 by cynicalpeace\n");
+                         fprintf(stderr, "GitHub: https://github.com/cynicalpeace/monero_gpu_cracker\n");
+                         fprintf(stderr, "Error: Benchmark passwords must be positive\n");
+                         return 1;
+                     }
+                 } else {
+                     benchmark_passwords = DEFAULT_BENCHMARK_PASSWORDS;
                  }
                  break;
              case 's':
@@ -327,21 +336,7 @@
          }
          hash_fname = argv[optind];
      } else if (optind < argc) {
-         char *next_arg = argv[optind];
-         if (next_arg && isdigit(next_arg[0])) {
-             benchmark_passwords = atoll(next_arg);
-             if (benchmark_passwords <= 0) {
-                 fprintf(stderr, "Monero GPU Cracker v0.1 by cynicalpeace\n");
-                 fprintf(stderr, "GitHub: https://github.com/cynicalpeace/monero_gpu_cracker\n");
-                 fprintf(stderr, "Error: Benchmark passwords must be positive\n");
-                 return 1;
-             }
-             printf("Warning: Using -B %zu as benchmark password count\n", benchmark_passwords);
-             optind++;
-         }
-         if (optind < argc) {
-             printf("Warning: Additional positional arguments ignored in benchmark mode\n");
-         }
+         printf("Warning: Additional positional arguments ignored in benchmark mode\n");
      }
  
      // Initialize NVML
@@ -362,7 +357,6 @@
      printf("Using GPU: %s with %zu MB total memory\n", props.name, props.totalGlobalMem / 1024 / 1024);
      nvmlMemory_t memory_info;
      nvmlDeviceGetMemoryInfo(nvml_device, &memory_info);
-     printf("Available memory: %llu MB\n", memory_info.free / 1024 / 1024);
  
      // Handle hash
      if (benchmark_mode) {
@@ -390,7 +384,6 @@
              nvmlShutdown();
              return 1;
          }
-         printf("Attempting hash: %.20s...\n", raw_hash);
      }
  
      // Parse hash
@@ -420,6 +413,24 @@
          while (fgets(line, sizeof(line), wordlist_file)) total_candidates++;
          rewind(wordlist_file);
          if (session_name && checkpoint_file) load_checkpoint();
+ 
+         size_t free_mem, total_mem;
+         cudaMemGetInfo(&free_mem, &total_mem);
+         if (batch_size_mode == 0) {
+             size_t available_mem = free_mem * 0.8;
+             batch_size = available_mem / MEMORY_PER_PASSWORD;
+             batch_size = batch_size < MIN_BATCH_SIZE ? MIN_BATCH_SIZE : (batch_size > MAX_BATCH_SIZE ? MAX_BATCH_SIZE : batch_size);
+             batch_size = batch_size > total_candidates ? total_candidates : batch_size;
+         } else {
+             batch_size = fixed_batch_size;
+             if (batch_size > total_candidates) batch_size = total_candidates;
+         }
+         printf("Total GPU memory: %zu MB, Free: %zu MB, Required: %zu MB\n", 
+                total_mem / (1024 * 1024), free_mem / (1024 * 1024), (batch_size * MEMORY_PER_PASSWORD) / (1024 * 1024));
+         printf("Starting key search: %lld passwords, %d threads, %zu batch size\n",
+                (long long)total_candidates, threads_per_block, batch_size);
+         printf("Note: Threads and batch size can be set with -t and -b\n");
+         printf("Attempting hash: %.20s...\n", raw_hash);
      } else {
          total_candidates = benchmark_passwords;
      }
@@ -434,9 +445,9 @@
      size_t max_batch_size = MAX_BATCH_SIZE;
  
      if (benchmark_mode) {
+         size_t free_mem, total_mem;
+         cudaMemGetInfo(&free_mem, &total_mem);
          if (batch_size_mode == 0) {
-             size_t free_mem, total_mem;
-             cudaMemGetInfo(&free_mem, &total_mem);
              size_t available_mem = free_mem * 0.8;
              batch_size = available_mem / memory_per_password;
              batch_size = batch_size < min_batch_size ? min_batch_size : (batch_size > max_batch_size ? max_batch_size : batch_size);
@@ -445,9 +456,11 @@
              batch_size = fixed_batch_size;
              if (batch_size > benchmark_passwords) batch_size = benchmark_passwords;
          }
-         printf("Running benchmark: %zu passwords, %d threads, %zu batch size\n",
-                total_candidates, threads_per_block, batch_size);
-         printf("Note: Threads and batch size can be set with -t and -b.\n");
+         printf("Total GPU memory: %zu MB, Free: %zu MB, Required: %zu MB\n", 
+                total_mem / (1024 * 1024), free_mem / (1024 * 1024), (batch_size * MEMORY_PER_PASSWORD) / (1024 * 1024));
+         printf("Running benchmark: %lld passwords, %d threads, %zu batch size\n",
+                (long long)total_candidates, threads_per_block, batch_size);
+         printf("Note: Threads and batch size can be set with -t and -b\n");
      }
  
      while ((benchmark_mode ? passwords_tested < benchmark_passwords : passwords_tested < total_candidates) && !found) {
@@ -463,29 +476,39 @@
              if (batch_size > total_candidates - passwords_tested) batch_size = total_candidates - passwords_tested;
          }
  
+         // In benchmark mode, stop at the last full batch
+         if (benchmark_mode && (passwords_tested + batch_size > benchmark_passwords)) {
+             actual_batch_size = (benchmark_passwords - passwords_tested) >= batch_size ? batch_size : 0;
+         } else {
+             actual_batch_size = batch_size;
+         }
+ 
+         if (actual_batch_size == 0) break; // Exit if no full batch remains
+ 
          // Allocate batch buffers
-         saved_key = mem_alloc(batch_size * sizeof(char *));
-         plaintext = mem_alloc(batch_size * sizeof(unsigned char *));
-         unsigned char *hashes = mem_alloc(batch_size * BINARY_SIZE);
+         saved_key = mem_alloc(actual_batch_size * sizeof(char *));
+         plaintext = mem_alloc(actual_batch_size * sizeof(unsigned char *));
+         unsigned char *hashes = mem_alloc(actual_batch_size * BINARY_SIZE);
  
          // Read a batch
-         actual_batch_size = 0;
-         while (actual_batch_size < batch_size && passwords_tested < (benchmark_mode ? benchmark_passwords : total_candidates)) {
+         size_t batch_index = 0;
+         while (batch_index < actual_batch_size && passwords_tested < (benchmark_mode ? benchmark_passwords : total_candidates)) {
              if (!benchmark_mode) {
                  if (fgets(line, sizeof(line), wordlist_file)) {
                      line[strcspn(line, "\n")] = 0;
-                     saved_key[actual_batch_size] = mem_alloc_tiny(strlen(line) + 1, MEM_ALIGN_WORD);
-                     strcpy(saved_key[actual_batch_size], line);
+                     saved_key[batch_index] = mem_alloc_tiny(strlen(line) + 1, MEM_ALIGN_WORD);
+                     strcpy(saved_key[batch_index], line);
                  } else break;
              } else {
-                 saved_key[actual_batch_size] = mem_alloc_tiny(16, MEM_ALIGN_WORD);
-                 sprintf(saved_key[actual_batch_size], "dummy_pass_%zu", passwords_tested);
+                 saved_key[batch_index] = mem_alloc_tiny(16, MEM_ALIGN_WORD);
+                 sprintf(saved_key[batch_index], "dummy_pass_%zu", passwords_tested);
              }
-             plaintext[actual_batch_size] = mem_alloc_tiny(cur_salt.len, MEM_ALIGN_WORD);
-             actual_batch_size++;
+             plaintext[batch_index] = mem_alloc_tiny(cur_salt.len, MEM_ALIGN_WORD);
+             batch_index++;
              passwords_tested++;
              if (!benchmark_mode) file_position = ftell(wordlist_file);
          }
+         actual_batch_size = batch_index;
  
          struct timespec gpu_start, gpu_end_batch, cpu_end_batch;
          clock_gettime(CLOCK_MONOTONIC, &gpu_start);
@@ -519,7 +542,7 @@
              if (memmem(plaintext[i], cur_salt.len, "key_data", 8) || memmem(plaintext[i], cur_salt.len, "m_creation_timestamp", 20)) {
                  #pragma omp critical
                  if (!found) {
-                     printf("\033[31mFound password: %s\033[0m\n", saved_key[i]);
+                     found_password = strdup(saved_key[i]);  // Store the found password
                      found = 1;
                  }
              }
@@ -529,8 +552,10 @@
  
          // Accumulate times and update batch rate
          double batch_gpu_time = (gpu_end_batch.tv_sec - gpu_start.tv_sec) + (gpu_end_batch.tv_nsec - gpu_start.tv_nsec) / 1e9;
+         total_gpu_time += batch_gpu_time;
+         total_passwords_processed += actual_batch_size;
          gpu_time += batch_gpu_time;
-         cpu_time += (cpu_end_batch.tv_sec - gpu_end_batch.tv_sec) + (cpu_end_batch.tv_nsec - cpu_end_batch.tv_nsec) / 1e9;
+         cpu_time += (cpu_end_batch.tv_sec - gpu_end_batch.tv_sec) + (cpu_end_batch.tv_nsec - gpu_end_batch.tv_nsec) / 1e9;
  
          // Update moving average of batch rates
          double batch_rate = batch_gpu_time > 0 ? (double)actual_batch_size / batch_gpu_time : 0;
@@ -569,14 +594,21 @@
  
      clock_gettime(CLOCK_MONOTONIC, &end_time);
  
-     if (!found) printf("No matching password found after testing %zu candidates\n", passwords_tested);
+     if (!found && !benchmark_mode) printf("No matching password found after testing %zu candidates\n", passwords_tested);
  
      double total_time = (end_time.tv_sec - start_time.tv_sec) + (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
-     double effective_hash_rate = gpu_time > 0 ? (double)(passwords_tested - initial_passwords_tested) / gpu_time : 0;
-     printf("GPU time: %.3f seconds\n", gpu_time);
+     double effective_hash_rate = total_gpu_time > 0 ? (double)total_passwords_processed / total_gpu_time : 0;
+     printf("\n--- Result ---\n");
+     if (benchmark_mode) printf("Benchmark stopped at the last full batch\n");
+     printf("Passwords tried: %zu / %lld\n", total_passwords_processed, benchmark_mode ? benchmark_passwords : (long long)total_candidates);
+     printf("GPU time: %.3f seconds\n", total_gpu_time);
      printf("CPU time: %.3f seconds\n", cpu_time);
      printf("Total time: %.3f seconds\n", total_time);
-     printf("Throughput: %.2f hashes/second\n", effective_hash_rate);
+     printf("Average Throughput: %.2f hashes/second\n", effective_hash_rate);
+     if (found_password) {
+         printf("\033[31mFound password: %s\033[0m\n", found_password);
+         free(found_password);  // Free the stored password memory
+     }
  
      // Cleanup
      if (!benchmark_mode && raw_hash) free(raw_hash);
