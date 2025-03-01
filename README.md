@@ -7,13 +7,13 @@
 - **Wordlist-Based Cracking**: Tests passwords from a user-supplied wordlist against a Monero wallet hash.
 - **Session Save/Resume**: Supports saving progress to resume later with `-s` and `-r` options.
 - **Tunable Performance**: Adjustable batch size (`-b`) and threads per block (`-t`), with defaults optimized for NVIDIA GeForce RTX 4090.
-- **Benchmark Mode**: Test performance with dummy passwords using `-B [<num>]` (defaults to 10,000).
+- **Benchmark Mode**: Test performance with dummy passwords using `-B [<num>]` (defaults to 20,000).
 - **Detailed Stats**: Verbosity levels (0-3) provide GPU memory usage, hash rate, temperature, and more.
 
 ## Notes
 - **Tested Hardware**: This tool has been tested exclusively on an NVIDIA GeForce RTX 4090. Performance may vary on other GPUs.
 - **Batch Size**: Defaults to an automatic setting based on available GPU memory (80% of free memory), but can be tuned with `-b <batch_size>` for optimization.
-- **Threads**: Set to 96 by default, which was optimal for the RTX 4090. Adjust with `-t <threads>` if needed for other GPUs.
+- **Threads**: Set to 32 by default, which was optimal for the RTX 4090. Adjust with `-t <threads>` if needed for other GPUs.
 
 ## Requirements
 - **NVIDIA GPU**: CUDA-capable GPU required (e.g., RTX 4090).
