@@ -80,7 +80,7 @@ Note: <hash_file> should contain only the hash from monero2john.py.
 ./monero_cracker hash.txt --wordlist words.txt -r mysession
 ```
 
-## Sample Output
+### Sample Output
 ```bash
 $ ./monero_cracker --benchmark --batch 10000 --threads 32 --verbose 0
 Monero GPU Cracker v0.1 by cynicalpeace
